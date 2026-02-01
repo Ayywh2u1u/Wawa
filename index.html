@@ -1,0 +1,102 @@
+<!doctype html>
+
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Runner procedural — Colin vs White Latex (Prototype)</title>
+<style>
+  html,body{height:100%;margin:0;background:#070709;color:#eee;font-family:system-ui,Arial}
+  #game{display:block;margin:12px auto;border:6px solid #111;box-shadow:0 10px 40px rgba(0,0,0,.8);background:#050507}
+  .hud{width:900px;margin:8px auto;color:#f3d;display:flex;justify-content:space-between}
+  .hint{font-size:14px;opacity:.95}
+  .controls{font-size:14px;color:#ddd}
+  .credits{font-size:12px;color:#888;text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="hud"><div class="hint">Run forever — evita camillas y charcos de goo. Si te conviertes en goo, eres inmune pero solo te queda reiniciar.</div><div class="controls">Estado: <span id="state">Listo</span> · Puntuación: <span id="score">0</span></div></div>
+<div id="mobileUI" style="position:fixed;bottom:20px;right:20px;z-index:10;display:none;gap:14px;flex-direction:column;align-items:flex-end;">
+  <button id="jumpBtn" style="width:84px;height:84px;border-radius:8px;border:2px solid rgba(80,80,80,0.9);background:rgba(160,160,160,0.7);color:#111;font-size:34px;box-shadow:0 6px 20px rgba(0,0,0,.45)">↑</button>
+  <button id="restartBtn" style="width:84px;height:48px;border-radius:8px;border:2px solid rgba(80,80,80,0.9);background:rgba(120,120,120,0.7);color:#111;font-size:16px;box-shadow:0 6px 20px rgba(0,0,0,.45);display:none">REINICIAR</button>
+</div><div class="controls">Estado: <span id="state">Listo</span> · Puntuación: <span id="score">0</span></div></div>
+<canvas id="game" width="900" height="400"></canvas>
+<div class="credits">Prototipo procedural — sprites de ejemplo (formas simples). Si quieres, sube sprites o dime pack público para integrarlos.</div>
+<script>
+/* Runner procedural: corredor horizontal en un pasillo de hospital con luces rojas.
+   Mecánicas:
+   - Colin (jugador) corre automáticamente hacia la derecha (el mundo se desplaza).
+   - Obstáculos: camillas (bed) y charcos White Goo Puddles.
+   - White Latex (perseguidor) viene desde atrás. Si te alcanza y no estás transformado -> GAME OVER.
+   - Si tocas un puddle te transformas (estado "goo"). En goo eres inmune, pero el juego sólo permite reiniciar.
+   - Procedural: obstáculos y puddles aparecen con semillas aleatorias; la velocidad y ritmo aumentan con el tiempo.
+   - No uso sprites con copyright: todo está dibujado con formas. Puedes subir sprites y los incorporo.
+*/const canvas = document.getElementById('game'); const ctx = canvas.getContext('2d'); const W = canvas.width, H = canvas.height;
+
+// Game state let score = 0; let state = 'running'; // 'running', 'transformed', 'gameover' let transformed = false; let seed = Math.floor(Math.random()*1000000); let time = 0;
+
+// Player (Colin) const player = { x: 120, y: H-90, w: 36, h: 56, vy:0, onGround:true, color:'#6ad3ff' };
+
+// Pursuer: White Latex const pursuer = { x: -160, y: H-90, w:64, h:84, speed:1.2 };
+
+// World speed (how fast obstacles move left) let worldSpeed = 3.5; // base
+
+// Procedural obstacle list let obstacles = []; // each has {type:'bed'|'puddle', x, w, h}
+
+// Random helper (simple LCG seeded) let randSeed = seed; function rand(){ randSeed = (randSeed*1664525 + 1013904223) % 4294967296; return randSeed/4294967296; }
+
+// Spawn logic function spawnLogic(dt){ // increase difficulty slowly time += dt; worldSpeed = 3.5 + Math.min(6, time0.0025); pursuer.speed = 1.0 + Math.min(2.5, time0.0008);
+
+// spawn intervals depend on time and randomness if(rand() < 0.02 + Math.min(0.12, time*0.0006)){ // spawn either bed or puddle const type = rand() < 0.7 ? 'bed' : 'puddle'; const gapY = H-80; // floor const w = type==='bed' ? 72 + Math.floor(rand()*24) : 64 + Math.floor(rand()*24); const h = type==='bed' ? 28 : 18; obstacles.push({type,x:W + 20 + Math.floor(rand()*200),w,h,y:gapY}); } }
+
+// Controls let keys = {}; window.addEventListener('keydown', e=>{ keys[e.code]=true; if(e.code==='Space'){ jump(); } if(e.key==='r'||e.key==='R'){ restart(); } }); window.addEventListener('keyup', e=>{ keys[e.code]=false; });
+
+// Mobile jump button const mobileUI = document.getElementById('mobileUI'); const jumpBtn = document.getElementById('jumpBtn'); const restartBtn = document.getElementById('restartBtn'); const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent); if(isMobile){ mobileUI.style.display='flex'; }
+
+// Jump button interactions jumpBtn.addEventListener('touchstart', e=>{ e.preventDefault(); jump(); jumpBtn.style.background='rgba(200,200,200,0.85)'; }); jumpBtn.addEventListener('touchend', e=>{ e.preventDefault(); jumpBtn.style.background='rgba(160,160,160,0.7)'; }); jumpBtn.addEventListener('mousedown', e=>{ e.preventDefault(); jump(); jumpBtn.style.background='rgba(200,200,200,0.85)'; }); jumpBtn.addEventListener('mouseup', e=>{ e.preventDefault(); jumpBtn.style.background='rgba(160,160,160,0.7)'; });('touchstart', e=>{ e.preventDefault(); jump(); }); jumpBtn.addEventListener('mousedown', e=>{ e.preventDefault(); jump(); });
+
+function jump(){ if(state!=='running') return; if(player.onGround){ player.vy = -10; player.onGround=false; }}
+
+// Collision helpers function rectsOverlap(a,b){ return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+
+// New mechanics: bed hits slow you; 3 hits = capture let bedHits = 0; let slowTimer = 0;
+
+function update(dt){ if(state==='gameover') return; spawnLogic(dt); if(state==='gameover') return; spawnLogic(dt); // physics player.vy += 0.6; player.y += player.vy; const ground = H-80; if(player.y + player.h >= ground){ player.y = ground - player.h; player.vy=0; player.onGround=true; }
+
+// move obstacles left for(let i=obstacles.length-1;i>=0;i--){ const ob = obstacles[i]; ob.x -= worldSpeed * (slowTimer>0?0.7:1); if(ob.x + ob.w < -50) obstacles.splice(i,1); }
+
+// update pursuer: follow from left unless transformed if(!transformed){ const targetX = player.x - 140; if(pursuer.x < targetX){ pursuer.x += (pursuer.speed + worldSpeed*0.15); } }
+
+// if transformed, pursuer slows if(transformed){ pursuer.x -= 0.3; }
+
+// collisions: player with obstacles if(!transformed && state==='running'){ for(const ob of obstacles){ const rectOb = {x:ob.x, y:ob.y - ob.h, w:ob.w, h:ob.h}; const rectPl = {x:player.x, y:player.y, w:player.w, h:player.h}; if(rectsOverlap(rectPl,rectOb)){ if(ob.type==='puddle'){ transformIntoGoo(); obstacles = obstacles.filter(o=>o!==ob); break; } else if(ob.type==='bed'){ bedHits++; slowTimer = 2000; obstacles = obstacles.filter(o=>o!==ob); document.getElementById('state').innerText = Golpes con camilla: ${bedHits}/3; if(bedHits>=3){ gameOver(); } break; } } } }
+
+// pursuer catch check const pursRect = {x:pursuer.x, y:pursuer.y, w:pursuer.w, h:pursuer.h}; const plRect = {x:player.x, y:player.y, w:player.w, h:player.h}; if(!transformed && rectsOverlap(pursRect,plRect)){ gameOver(); }
+
+// score increments by distance score += Math.floor(worldSpeeddt0.1); document.getElementById('score').innerText = Math.floor(score); }
+
+function transformIntoGoo(){ transformed = true; state='transformed'; player.color = '#ffffff'; document.getElementById('state').innerText = 'Transformado — White Latex deja de perseguirte. Presiona R o usa el botón'; restartBtn.style.display='block'; }(){ transformed = true; state='transformed'; player.color = '#ffffff'; document.getElementById('state').innerText = 'Transformado — White Latex deja de perseguirte. Presiona R para reiniciar'; } function gameOver(){ state='gameover'; document.getElementById('state').innerText = 'Atrapado — GAME OVER'; restartBtn.style.display='block'; }(){ state='gameover'; document.getElementById('state').innerText = 'Atrapado — GAME OVER. Presiona R para reiniciar'; } function restart(){ seed = Math.floor(Math.random()*1000000); randSeed = seed; obstacles=[]; time=0; score=0; transformed=false; state='running'; bedHits=0; slowTimer=0; player.y = H-90; player.vy=0; player.onGround=true; player.color='#6ad3ff'; pursuer.x = -200; restartBtn.style.display='none'; document.getElementById('score').innerText = '0'; document.getElementById('state').innerText = 'Listo'; }(){ seed = Math.floor(Math.random()*1000000); randSeed = seed; obstacles=[]; time=0; score=0; transformed=false; state='running'; bedHits=0; slowTimer=0; player.y = H-90; player.vy=0; player.onGround=true; player.color='#6ad3ff'; pursuer.x = -200; document.getElementById('score').innerText = '0'; document.getElementById('state').innerText = 'Listo'; }
+
+// Drawing function draw(){ // background corridor ctx.clearRect(0,0,W,H); // floor ctx.fillStyle='#0b0b0d'; ctx.fillRect(0,H-80,W,80); // walls ctx.fillStyle='#08060a'; ctx.fillRect(0,0,W,H-80);
+
+// red emergency lights (flicker) const flick = Math.sin(time0.02)0.5 + 0.5; for(let i=0;i<10;i++){ const lx = (i180 + (time0.6)%180) % (W+120) - 60; ctx.fillStyle = rgba(255,40,40,${0.08 + 0.12*flick}); ctx.fillRect(lx,10,80,12); }
+
+// ceiling lights for(let i=0;i<12;i++){ const cx = i80 + (time0.8 % 80); ctx.fillStyle = rgba(255,255,200,${0.06 + 0.1*Math.abs(Math.sin((time*0.01)+i))}); ctx.fillRect(cx, 30, 50, 8); }
+
+// draw obstacles for(const ob of obstacles){ if(ob.type==='bed'){ // camilla shape ctx.fillStyle='#6f9'; ctx.fillRect(ob.x, ob.y - ob.h, ob.w, ob.h); ctx.fillStyle='#333'; ctx.fillRect(ob.x+6, ob.y - ob.h + 6, ob.w-12, ob.h-12); // wheels ctx.fillStyle='#222'; ctx.fillRect(ob.x+10, ob.y-6, 8,4); ctx.fillRect(ob.x+ob.w-18, ob.y-6, 8,4); } else { // puddle goo ctx.beginPath(); ctx.ellipse(ob.x+ob.w/2, ob.y - ob.h/2, ob.w/2, ob.h/2, 0, 0, Math.PI*2); ctx.fillStyle='#bfefff'; ctx.fill(); ctx.fillStyle='#dff'; ctx.fillRect(ob.x+ob.w/2-8, ob.y - ob.h/2-6, 16,6); } }
+
+// draw player (Colin) ctx.fillStyle = player.color; ctx.fillRect(player.x, player.y, player.w, player.h); // face ctx.fillStyle = '#222'; ctx.fillRect(player.x+8, player.y+12, 6,8); ctx.fillRect(player.x+22, player.y+12, 6,8);
+
+// draw pursuer (white latex) as blob with ears ctx.save(); ctx.translate(pursuer.x, pursuer.y); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(0+pursuer.w/2,0+pursuer.h/2,pursuer.w/2,pursuer.h/2,0,0,Math.PI*2); ctx.fill(); // eyes ctx.fillStyle='#111'; ctx.fillRect(12,24,6,8); ctx.fillRect(36,24,6,8); // mouth slit ctx.fillStyle='rgba(0,0,0,0.15)'; ctx.fillRect(20,44,16,6); ctx.restore();
+
+// HUD hints if(state==='transformed'){ ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(220,60,460,48); ctx.fillStyle='#fff'; ctx.font='16px system-ui'; ctx.fillText('Has sido transformado. Eres inmune pero no hay objetivo. Presiona R para reiniciar.', 240, 92); } else if(state==='gameover'){ ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(220,60,460,48); ctx.fillStyle='#fff'; ctx.font='18px system-ui'; ctx.fillText('Game Over — te atrapó White Latex. Presiona R para reiniciar.', 260, 92); } }
+
+// Main loop let last = performance.now(); function loop(now){ const dt = now - last; last = now; if(state!=='gameover') update(dt); draw(); requestAnimationFrame(loop);
+
+// Restart button restartBtn.addEventListener('touchstart', e=>{ e.preventDefault(); restart(); }); restartBtn.addEventListener('mousedown', e=>{ e.preventDefault(); restart(); }); } requestAnimationFrame(loop);
+
+// Expose a simple API to connect AI agents: push 'jump' events or read game state via window.runAPI window.runAPI = { jump: ()=>{ jump(); }, getState: ()=>({player:{x:player.x,y:player.y,w:player.w,h:player.h}, pursuer:{x:pursuer.x,y:pursuer.y}, obstacles:obstacles.map(o=>({type:o.type,x:o.x,w:o.w,y:o.y})), transformed, state, score:Math.floor(score)}) };
+
+</script>
+</body>
+</html>
